@@ -19,15 +19,11 @@ Battlesnake_Game :: struct {
 }
 
 Battlesnake_Board :: struct {
-    height:  s64;
     width:   s64;
+    height:  s64;
     food:    [..]Coordinate;
     hazards: [..]Coordinate;
     snakes:  [..]Battlesnake_Snake;
-}
-
-Board :: struct {
-
 }
 
 Battlesnake_Snake :: struct {
@@ -182,9 +178,9 @@ score_game_state :: (using game_state : Battlesnake_Game_State, you_idx : s64) -
         return DEAD_SCORE;
     }
 
-    for snake, snakeIdx : board.snakes {
+    for snake, snake_idx : board.snakes {
         for snake.body {
-            if snakeIdx == you_idx && it_index == 0  continue; // skip our head
+            if snake_idx == you_idx && it_index == 0  continue; // skip our head
             if snake_to_score.head == it  return DEAD_SCORE;
         }
     }
@@ -208,6 +204,93 @@ Shifted_Battlesnake_Game_State :: struct {
     checked       : bool = false;
 }
 
+Grid :: struct {
+    entities : [][]Entity;
+    width    : s64;
+    height   : s64;
+}
+
+Entity :: enum_flags u8 {
+    EMPTY;
+    HEAD;
+    SELF;
+    ENEMY;
+    FOOD;
+}
+
+convert_board :: (using game_state : *Battlesnake_Game_State) -> *Grid {
+
+    using grid : Grid;
+
+    // set grid dimensions
+    width  = board.width;
+    height = board.height;
+
+    // initialize the grid with empty spots
+    // array_reserve(*entities, height);
+    entities = NewArray(height, []Entity, false);
+    print("entities.count: %\n", entities.count);
+    for j : 0..height-1 {
+        entities[j] = NewArray(width, Entity, false);
+        for i : 0..width-1  entities[j][i] = .EMPTY;
+        // array_add(*entities, tmp);
+    }
+
+    // determine index of our snake
+    self_idx := 0;
+    for board.snakes {
+        if you.id == it.id {
+            self_idx = it_index;
+            break;
+        }
+    }
+
+    // mark snakes
+    for snake, snake_idx : board.snakes {
+        for snake.body {
+            if snake_idx == self_idx
+                entities[height-it.y-1][it.x] = .SELF;
+            else
+                entities[height-it.y-1][it.x] = .ENEMY;
+
+            if snake.head == it
+                entities[height-it.y-1][it.x] |= .HEAD;
+        }
+    }
+
+    // mark food
+    for board.food  entities[height-it.y-1][it.x] = .FOOD;
+
+    // print("*entities: %\n", *entities);
+    // print_grid(*grid);
+    return *grid;
+}
+
+// TODO: have this build/return a string
+print_grid :: (entities : *[][]Entity) {
+    print("entities.count: %\n", entities.count);
+    for row : <<entities {
+        print("row.count: %\n", row.count);
+        write(STDOUT_FILENO, "[");
+        for entity : row {
+            if entity == {
+                case .EMPTY;
+                    write(STDOUT_FILENO, "+");
+                case .HEAD;
+                    write(STDOUT_FILENO, "^");
+                case .SELF;
+                    write(STDOUT_FILENO, "*");
+                case .ENEMY;
+                    write(STDOUT_FILENO, "@");
+                case .FOOD;
+                    write(STDOUT_FILENO, "o");
+            }
+        }
+        write(STDOUT_FILENO, "]\n");
+    }
+    write(STDOUT_FILENO, "\n");
+}
+
 calculate_move :: (game_state : Battlesnake_Game_State) -> Move {
 
     you_idx := 0;
@@ -217,6 +300,8 @@ calculate_move :: (game_state : Battlesnake_Game_State) -> Move {
             break;
         }
     }
+
+    print_grid(*(convert_board(*game_state).entities));
 
     next_moves : [..]Move;
     bad_moves : [..]Move;
