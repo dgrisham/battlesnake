@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  battlesnake:
+    build:
+      context: .
+    environment:
+      ENTR_INOTIFY_WORKAROUND: 1
+    container_name: battlesnake
+    restart: unless-stopped
+    ports:
+      - "4041-4049:4041-4049"
+    expose:
+      - "4041-4049"
+    tty: true
+    volumes:
+      - ../jai:/home/jai/jai
+      - .:/home/jai/battlesnake
+    command: sh -c 'find /home/jai/battlesnake \( -name "*.jai" ! -name ".*" \) | entr -r -n -c sh -c "stdbuf -oL /home/jai/jai/bin/jai-linux /home/jai/battlesnake/server.jai && /home/jai/battlesnake/server"'

@@ -36,7 +36,14 @@ Battlesnake_Snake :: struct {
     length       : s64;
     shout        : string;
     squad        : string;
-    health_delta : s64 = 0;
+}
+
+Snake :: struct {
+    health       : s64;
+    body         : []Coordinate;
+    head         : Coordinate;
+    length       : s64;
+    health_delta : s64;
 }
 
 Coordinate :: struct {
@@ -85,30 +92,12 @@ move_to_string :: (move : Move) -> string {
     }
 }
 
-move_battlesnake_snake :: (snake : Battlesnake_Snake, move : Move) -> Battlesnake_Snake {
-
-    new_snake : Battlesnake_Snake;
-    new_snake.health_delta = 1;
-    new_snake.health       = snake.health - 1;
-    new_snake.length       = snake.length;
-
-    new_snake.body    = NewArray(snake.body.count, Coordinate, false);
-    new_snake.body[0] = move_coordinate(snake.body[0], move);
-
-    for i: 1..snake.body.count-1 {
-        new_snake.body[i] = snake.body[i-1];
-    }
-    new_snake.head = new_snake.body[0];
-
-    return new_snake;
-}
-
 move_coordinate :: (coord : Coordinate, move : Move) -> Coordinate {
     if #complete move == {
         case .UP;
-            return coord + .{x = 0, y = 1};
-        case .DOWN;
             return coord + .{x = 0, y = -1};
+        case .DOWN;
+            return coord + .{x = 0, y = 1};
         case .LEFT;
             return coord + .{x = -1, y = 0};
         case .RIGHT;
@@ -116,118 +105,90 @@ move_coordinate :: (coord : Coordinate, move : Move) -> Coordinate {
     }
 }
 
-update_game_state :: (using game_state : *Game_State, moves : []Move) -> *Game_State {
+update_game_state :: (old : Game_State, moves : []Move) -> Game_State {
 
-    new_game_state := initialize_game_state(grid.width, grid.height, snakes, self_idx);
+    new := initialize_game_state(old.grid.width, old.grid.height, old.snakes.count, old.self_idx);
+    for rows, y : old.grid.entities // update food on the board
+        for entity, x : rows
+            if entity == .FOOD  new.grid.entities[y][x] = .FOOD;
 
     for move, i : moves {
 
-        updated_snake := move_battlesnake_snake(snakes[i], move);
-        // TODO: update grid to reflect change in snake (move snake on grid, eat food)
+        // move the snake
+        new.snakes[i] = move_snake(old.snakes[i], move);
+        using new.snakes[i];
 
-        new_health := snakes[i].health;
-        if updated_snake.head.x < 0 || updated_snake.head.x >= grid.width
-        || updated_snake.head.y < 0 || updated_snake.head.y >= grid.height
-            new_health = 0;
-        else if grid.entities[updated_snake.head.x][updated_snake.head.y] == {
-            case .FOOD;
-                new_health = 100;
-            // TODO: these checks don't make sense until we've updated the grid to reflect the moved snakes
-            case .SELF; #through;
-            case .ENEMY; #through;
-            case .ENEMY_HEAD;
-                new_health = 0;
+        // mark snake on grid
+        for body {
+            if head.x < 0 || head.x >= new.grid.width
+            || head.y < 0 || head.y >= new.grid.height { // head is off the board
+                health = 0;
+                continue;
+            } else if new.grid.entities[it.y][it.x] == .FOOD { // TODO: grow snake when it eats
+                health = MAX_HEALTH;
+            }
+
+            if i == new.self_idx
+                new.grid.entities[it.y][it.x] = .SELF;
+            else
+                new.grid.entities[it.y][it.x] = .ENEMY;
+
+            if head == it
+                new.grid.entities[it.y][it.x] |= .HEAD;
         }
-
-        snakes[i].health_delta = new_health - snakes[i].health;
-        snakes[i].health       = new_health;
-
-        // j := 0;
-        // while j < board.food.count - 1 {
-        //     if updated_snake.head == board.food[j] {
-        //         updated_snake.health_delta = 100 - updated_snake.health;
-        //         updated_snake.health = 100;
-        //         array_unordered_remove_by_index(*board.food, j);
-        //     } else {
-        //         j += 1;
-        //     }
-        // }
-
-        // new_board.snakes[i] = updated_snake;
     }
 
-    return new_game_state;
+    for * new.snakes {
+
+        if it.health != 0 // snake didn't run off board
+            if new.grid.entities[it.head.y][it.head.x] == {
+                case .SELF;  #through;
+                case .ENEMY; #through;
+                case Entity.ENEMY | .HEAD;
+                    it.health = 0;
+            }
+
+        it.health_delta = it.health - old.snakes[it_index].health;
+    }
+
+    return new;
 }
 
-// update_battlesnake_board :: (using board : Battlesnake_Board, moves : []Move) -> Battlesnake_Board {
+move_snake :: (snake : Snake, move : Move) -> Snake, Coordinate {
 
-//     new_board : Battlesnake_Board;
+    old_tail := snake.body[snake.body.count-1];
 
-//     new_board.height = height;
-//     new_board.width  = width;
+    new_snake : Snake;
+    new_snake.health       = snake.health - 1;
+    new_snake.length       = snake.length;
+    new_snake.health_delta = -1;
 
-//     array_reserve(*new_board.food, food.count);
-//     for food  array_add(*new_board.food, it);
+    new_snake.body    = NewArray(snake.body.count, Coordinate, false);
+    // print("move: %\n", move);
+    new_snake.body[0] = move_coordinate(snake.body[0], move);
 
-//     array_reserve(*new_board.hazards, hazards.count);
-//     for hazards  array_add(*new_board.hazards, it);
+    for i: 1..snake.body.count-1 {
+        new_snake.body[i] = snake.body[i-1];
+    }
+    new_snake.head = new_snake.body[0];
 
-//     new_board.snakes = NewArray(moves.count, Battlesnake_Snake);
-//     // array_reserve(*new_board.snakes, snakes.count);
-//     for move, i : moves {
+    // print("old: %\n", snake.body);
+    // print("new: %\n", new_snake.body);
+    return new_snake, old_tail;
+}
 
-//         updated_snake := move_snake(snakes[i], move);
-
-//         j := 0;
-//         while j < board.food.count - 1 {
-//             if updated_snake.head == board.food[j] {
-//                 updated_snake.health_delta = 100 - updated_snake.health;
-//                 updated_snake.health = 100;
-//                 array_unordered_remove_by_index(*board.food, j);
-//             } else {
-//                 j += 1;
-//             }
-//         }
-
-//         new_board.snakes[i] = updated_snake;
-//     }
-
-//     return new_board;
-// }
-
+MAX_HEALTH       :: 100;
 HEALTH_THRESHOLD :: 35;
 DEAD_SCORE       :: -100;
 
-score_game_state :: (using game_state : *Game_State) -> s64 {
+score_game_state :: (using game_state : Game_State) -> s64 {
+    if snakes[self_idx].health == 0                                    return DEAD_SCORE;
+    if snakes[self_idx].health <= HEALTH_THRESHOLD                     return DEAD_SCORE / 2;
+    if snakes[self_idx].health_delta >= MAX_HEALTH - HEALTH_THRESHOLD  return snakes[self_idx].health_delta;
     return 0;
 }
 
-// score_battlesnake_game_state :: (using game_state : Battlesnake_Game_State, you_idx : s64) -> s64 {
-
-//     snake_to_score := board.snakes[you_idx];
-
-//     // make sure our head is in the board
-//     if snake_to_score.head.x < 0
-//     || snake_to_score.head.y < 0
-//     || snake_to_score.head.x >= board.width
-//     || snake_to_score.head.y >= board.height {
-//         return DEAD_SCORE;
-//     }
-
-//     for snake, snake_idx : board.snakes {
-//         for snake.body {
-//             if snake_idx == you_idx && it_index == 0  continue; // skip our head
-//             if snake_to_score.head == it  return DEAD_SCORE;
-//         }
-//     }
-
-//     if snake_to_score.health       <= HEALTH_THRESHOLD       return DEAD_SCORE / 2;
-//     if snake_to_score.health_delta >= 100 - HEALTH_THRESHOLD return snake_to_score.health_delta;
-
-//     return 0;
-// }
-
-MAX_DEPTH :: 6;
+MAX_DEPTH :: 1;
 
 MOVE_LIST :: Move.[.UP, .DOWN, .LEFT, .RIGHT];
 
@@ -241,7 +202,7 @@ Shifted_Battlesnake_Game_State :: struct {
 }
 
 Shifted_Game_State :: struct {
-    game_state    : *Game_State;
+    game_state    : Game_State;
     move          : Move;
     original_move : Move;
     depth         : s64  = 0;
@@ -251,7 +212,7 @@ Shifted_Game_State :: struct {
 
 Game_State :: struct {
     grid     : Grid;
-    snakes   : []Battlesnake_Snake;
+    snakes   : []Snake;
     self_idx : s64;
 };
 
@@ -261,16 +222,15 @@ Grid :: struct {
     height   : s64;
 }
 
-Entity :: enum u8 {
+Entity :: enum_flags u8 {
     EMPTY;
-    SELF_HEAD;
+    HEAD;
     SELF;
-    ENEMY_HEAD;
     ENEMY;
     FOOD;
 }
 
-convert_game_state :: (using battlesnake_game_state : *Battlesnake_Game_State) -> *Game_State {
+convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) -> Game_State {
 
     // determine index of our snake
     you_idx : s64;
@@ -281,7 +241,33 @@ convert_game_state :: (using battlesnake_game_state : *Battlesnake_Game_State) -
         }
     }
 
-    using game_state := initialize_game_state(board.width, board.height, board.snakes, you_idx);
+    using game_state := initialize_game_state(board.width, board.height, board.snakes.count, you_idx);
+
+    for battlesnake_snake, snake_idx : board.snakes {
+
+        snakes[snake_idx].health = battlesnake_snake.health;
+        snakes[snake_idx].head.x = battlesnake_snake.head.x;
+        snakes[snake_idx].head.y = board.height - battlesnake_snake.head.y - 1;
+        snakes[snake_idx].length = battlesnake_snake.length;;
+        snakes[snake_idx].body = NewArray(battlesnake_snake.body.count, Coordinate, false);
+
+        for battlesnake_snake.body {
+
+            x := it.x;
+            y := grid.height - it.y - 1;
+
+            snakes[snake_idx].body[it_index].x = x;
+            snakes[snake_idx].body[it_index].y = y;
+
+            if snake_idx == self_idx
+                grid.entities[y][x] = .SELF;
+            else
+                grid.entities[y][x] = .ENEMY;
+
+            if snakes[snake_idx].body[it_index] == snakes[snake_idx].head
+                grid.entities[y][x] |= .HEAD;
+        }
+    }
 
     // mark food
     for board.food  grid.entities[grid.height-it.y-1][it.x] = .FOOD;
@@ -289,17 +275,16 @@ convert_game_state :: (using battlesnake_game_state : *Battlesnake_Game_State) -
     return game_state;
 }
 
-initialize_game_state :: (width : s64, height : s64, battlesnake_snakes : []Battlesnake_Snake, you_idx : s64) -> *Game_State {
+initialize_game_state :: (width : s64, height : s64, num_snakes : s64, you_idx : s64) -> Game_State {
 
-    using game_state := New(Game_State);
+    using game_state : Game_State;
     game_state.self_idx = you_idx;
 
     /******************
     * copy the snakes *
     ******************/
 
-    snakes = NewArray(battlesnake_snakes.count, Battlesnake_Snake, false);
-    for battlesnake_snakes  snakes[it_index] = it;
+    snakes = NewArray(num_snakes, Snake, false);
 
     /******************
     * set up the grid *
@@ -316,22 +301,6 @@ initialize_game_state :: (width : s64, height : s64, battlesnake_snakes : []Batt
         for i : 0..width-1  grid.entities[j][i] = .EMPTY;
     }
 
-    // mark snakes
-    for snake, snake_idx : snakes {
-        for snake.body {
-            if snake_idx == self_idx
-                if snake.head == it
-                    grid.entities[it.y][it.x] = .SELF_HEAD;
-                else
-                    grid.entities[it.y][it.x] = .SELF;
-            else
-                if snake.head == it
-                    grid.entities[it.y][it.x] = .ENEMY_HEAD;
-                else
-                    grid.entities[it.y][it.x] = .ENEMY;
-        }
-    }
-
     return game_state;
 }
 
@@ -342,19 +311,19 @@ grid_to_string :: (using grid : Grid) -> string {
     for row : entities {
         append(*builder, "[");
         for entity : row {
-            if #complete entity == {
+            if entity == {
 
                 case .EMPTY;
                     append(*builder, "+");
                 case .FOOD;
                     append(*builder, "o");
 
-                case .SELF_HEAD;
+                case Entity.SELF | .HEAD;
                     append(*builder, "^");
                 case .SELF;
                     append(*builder, "*");
 
-                case .ENEMY_HEAD;
+                case Entity.ENEMY | .HEAD;
                     append(*builder, "8");
                 case .ENEMY;
                     append(*builder, "@");
@@ -371,9 +340,10 @@ grid_to_string :: (using grid : Grid) -> string {
 
 calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 
-    game_state := convert_game_state(*battlesnake_game_state);
+    game_state := convert_game_state(battlesnake_game_state);
 
     print(grid_to_string(game_state.grid));
+    print("snakes: %\n", game_state.snakes);
 
     next_moves : []Move = NewArray(battlesnake_game_state.board.snakes.count, Move);
     total_scores := s64.[0, 0, 0, 0];
@@ -396,6 +366,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
             for * shifted_game_state : shifted_game_states {
 
                 score := score_game_state(shifted_game_state.game_state);
+
                 if score == DEAD_SCORE {
                     shifted_game_state.dead = true;
                     score += shifted_game_state.depth; // prefer to die later
@@ -440,6 +411,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 
     average_move_scores : [4]s64;
     for total_scores  average_move_scores[it_index] = it / num_scores[it_index];
+    for average_move_scores  print("move: %, avg_score: %\n", cast(Move) it_index, it);
 
     max_score := average_move_scores[0];
     max_score_idx := 0;
@@ -451,6 +423,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
         }
     }
 
+    print("choice: %\n", cast(Move) max_score_idx);
     return cast(Move) max_score_idx;
 }
 
