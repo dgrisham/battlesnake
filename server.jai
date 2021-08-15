@@ -130,12 +130,14 @@ main :: () {
                 exit(1);
             }
 
-            /*********************************************************************
-            * get the content length so we know when we're done parsing the body *
-            *********************************************************************/
+            /*************************
+            * parse the request body *
+            *************************/
 
-            content_length : s64;
             {
+                // get the content length so we know when we're done parsing the body *
+                content_length : s64;
+
                 content_length_str, success := table_find(<<request.headers, "Content-Length");
                 if success {
                     content_length, success = string_to_int(content_length_str);
@@ -144,24 +146,20 @@ main :: () {
                         exit(1);
                     }
                 }
+
+                body_builder : String_Builder;
+                init_string_builder(*body_builder);
+
+                // put the rest of the unparsed data into the request body
+                append(*body_builder, *req[bytes_parsed], n - bytes_parsed);
+                while builder_string_length(*body_builder) < content_length { // more data to read from the socket
+                    n := read(client_fd, req, BUFFER_MAX);
+                    append(*body_builder, req, n);
+                }
+
+                request.body = builder_to_string(*body_builder);
+                reset(*body_builder);
             }
-
-            /*************************
-            * parse the request body *
-            *************************/
-
-            body_builder : String_Builder;
-            init_string_builder(*body_builder);
-
-            // put the rest of the unparsed data into the request body
-            append(*body_builder, *req[bytes_parsed], n - bytes_parsed);
-            while builder_string_length(*body_builder) < content_length { // more data to read from the socket
-                n := read(client_fd, req, BUFFER_MAX);
-                append(*body_builder, req, n);
-            }
-
-            request.body = builder_to_string(*body_builder);
-            reset(*body_builder);
 
             free(req);
 
