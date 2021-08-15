@@ -7,10 +7,10 @@
 
 #load "battlesnake.jai";
 
+DEBUG_HTTP :: false;
 AI_PASSIVE :: 0x0001; // netdb.h
 INET6_ADDSTRLEN :: 46;
 
-// ports :: string.["4040"];
 ports :: string.["4041", "4042", "4043", "4044", "4045", "4046", "4047", "4048", "4049"];
 BACKLOG :: 10;
 BUFFER_MAX :: 65536;
@@ -112,9 +112,6 @@ main :: () {
 
         if fork() == 0 { // child
 
-            // for the random moves
-            // random_seed(getpid());
-
             close(sockfd);
 
             req : *u8 = alloc(BUFFER_MAX);
@@ -127,11 +124,44 @@ main :: () {
             context.allocator       = __temporary_allocator;
             context.allocator_data  = null;
 
-            request, error := parse_request(req, cast(u32)n);
+            request, bytes_parsed, error := parse_request_header(req, cast(u32)n);
             if error != "" {
                 print("error parsing HTTP request: %\n", error);
-                exit(0);
+                exit(1);
             }
+
+            /*********************************************************************
+            * get the content length so we know when we're done parsing the body *
+            *********************************************************************/
+
+            content_length : s64;
+            {
+                content_length_str, success := table_find(<<request.headers, "Content-Length");
+                if success {
+                    content_length, success = string_to_int(content_length_str);
+                    if !success {
+                        print("error parsing Content-Length header value '%' as int", content_length_str);
+                        exit(1);
+                    }
+                }
+            }
+
+            /*************************
+            * parse the request body *
+            *************************/
+
+            body_builder : String_Builder;
+            init_string_builder(*body_builder);
+
+            // put the rest of the unparsed data into the request body
+            append(*body_builder, *req[bytes_parsed], n - bytes_parsed);
+            while builder_string_length(*body_builder) < content_length { // more data to read from the socket
+                n := read(client_fd, req, BUFFER_MAX);
+                append(*body_builder, req, n);
+            }
+
+            request.body = builder_to_string(*body_builder);
+            reset(*body_builder);
 
             free(req);
 
@@ -144,7 +174,7 @@ main :: () {
                     if request.start_line.uri == {
 
                         case "/";
-                            response.body = json_write_string(Snake_Customization.{});
+                            response.body = json_write_string(Battlesnake_Customization.{});
 
                         case;
                             response.status_line.status_code = 404;
@@ -165,11 +195,7 @@ main :: () {
                             }
                             if <<print_req {
                                 print("Failed to parse game state from /move POST request\n");
-                                print("n: %\n", n);
-                                s := alloc_string(n);
-                                s.data = req;
-                                s.count =  n;
-                                print("req: %\n", s);
+                                print("request.body: %\n", request.body);
                                 exit(1);
                             }
 
@@ -181,29 +207,34 @@ main :: () {
                     }
 
                 case .PUT;
-                        response.status_line.status_code = 404;
-                        response.status_line.reason_phrase = "Not Found";
+                    if request.start_line.uri == {
+                        case;
+                            response.status_line.status_code = 404;
+                            response.status_line.reason_phrase = "Not Found";
+                    }
 
                 case .DELETE;
-                        response.status_line.status_code = 404;
-                        response.status_line.reason_phrase = "Not Found";
+                    if request.start_line.uri == {
+                        case;
+                            response.status_line.status_code = 404;
+                            response.status_line.reason_phrase = "Not Found";
+                    }
             }
 
             res := response_to_string(response);
             sent := write(client_fd, res);
             if sent == -1  print("error sending message to client\n");
-            // print("sent % bytes\n", sent);
 
-            // print("request: %\n\n", <<request);
-            // print("response: %\n", response);
-            // print("-----\neee
+            #if DEBUG_HTTP {
+                print("request: %\n\n", <<request);
+                print("response: %\n", response);
 
-            // TODO: debug mode to print this/other stuff
-            // print("request.start_line: %\n", request.start_line);
-            // for v, k : request.headers {
-            //     print("'%': '%'\n", k, v);
-            // }
-            // print("body: '%'\n", request.body);
+                print("request.start_line: %\n", request.start_line);
+                for v, k : request.headers {
+                    print("'%': '%'\n", k, v);
+                }
+                print("body: '%'\n", request.body);
+            }
 
             close(client_fd);
             reset_temporary_storage();
@@ -291,7 +322,7 @@ Method :: enum u8 {
 }
 
 // reference: https://datatracker.ietf.org/doc/html/rfc7230
-parse_request :: (req : *u8, n : u32) -> *Request, string {
+parse_request_header :: (req : *u8, n : u32) -> *Request, u32, string {
 
     request : *Request = alloc(size_of(Request));
     i : u32 = 0; // req index
@@ -306,7 +337,7 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
     while is_alpha(req[i]) {
         append(*builder, req[i]);
         i += 1;
-        if i == n  return null, "reached end of message while parsing HTTP method";
+        if i == n  return null, 0, "reached end of message while parsing HTTP method";
     }
 
     method := builder_to_string(*builder);
@@ -320,14 +351,14 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
         case "DELETE";
             request.start_line.method = .DELETE;
         case;
-            return null, tprint("unexpected HTTP method: %", method);
+            return null, 0, tprint("unexpected HTTP method: %", method);
     }
     reset(*builder);
 
     // single space
-    if req[i] != #char " "  return null, tprint("unexpected character after parsing HTTP method: %", to_string(*req[i], 1));
+    if req[i] != #char " "  return null, 0, tprint("unexpected character after parsing HTTP method: %", to_string(*req[i], 1));
     i += 1;
-    if i == n               return null, "reached end of message after parsing HTTP method";
+    if i == n               return null, 0, "reached end of message after parsing HTTP method";
 
     /******
     * uri *
@@ -336,16 +367,16 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
     while is_http_char(req[i]) {
         append(*builder, req[i]);
         i += 1;
-        if i == n  return null, "reached end of message while parsing request URI";
+        if i == n  return null, 0, "reached end of message while parsing request URI";
     }
 
     request.start_line.uri = builder_to_string(*builder);
     reset(*builder);
 
     // single space
-    if req[i] != #char " "  return null, tprint("unexpected character after parsing request URI '%': '%'", request.start_line.uri, to_string(*req[i], 1));
+    if req[i] != #char " "  return null, 0, tprint("unexpected character after parsing request URI '%': '%'", request.start_line.uri, to_string(*req[i], 1));
     i += 1;
-    if i == n               return null, "reached end of message after parsing request URI";
+    if i == n               return null, 0, "reached end of message after parsing request URI";
 
     /**********
     * version *
@@ -354,7 +385,7 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
     while is_http_char(req[i]) {
         append(*builder, req[i]);
         i += 1;
-        if i == n  return null, "reached end of message while parsing HTTP version";
+        if i == n  return null, 0, "reached end of message while parsing HTTP version";
     }
 
     request.start_line.version = builder_to_string(*builder);
@@ -364,9 +395,9 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
     i += numChars;
     if linefeeds == {
         case 0;
-            return null, tprint("expected (CR)LF at the end of HTTP start-line, got '%'", to_string(*req[i], 1));
+            return null, 0, tprint("expected (CR)LF at the end of HTTP start-line, got '%'", to_string(*req[i], 1));
         case 1;
-            if i == n  return null, "missing (CR)LF after HTTP start-line";
+            if i == n  return null, 0, "missing (CR)LF after HTTP start-line";
     }
 
     /**********
@@ -380,16 +411,16 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
         while is_header_field_name_char(req[i]) {
             append(*builder, req[i]);
             i += 1;
-            if i == n  return null, "reached end of message while parsing header field name";
+            if i == n  return null, 0, "reached end of message while parsing header field name";
         }
 
         key := builder_to_string(*builder);
         reset(*builder);
 
         // :
-        if req[i] != #char ":"  return null, tprint("unexpected character after parsing header field name '%': expected ':', got '%'", key, to_string(*req[i], 1));
+        if req[i] != #char ":"  return null, 0, tprint("unexpected character after parsing header field name '%': expected ':', got '%'", key, to_string(*req[i], 1));
         i += 1;
-        if i == n               return null, "reached end of message after parsing header field name";
+        if i == n               return null, 0, "reached end of message after parsing header field name";
 
         // optional whitespace
         while is_hspace(req[i])  i += 1;
@@ -398,7 +429,7 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
         while is_header_field_value_char(req[i]) {
             append(*builder, req[i]);
             i += 1;
-            if i == n  return null, "reached end of message while parsing header field value";
+            if i == n  return null, 0, "reached end of message while parsing header field value";
         }
 
         table_add(request.headers, key, builder_to_string(*builder));
@@ -412,23 +443,13 @@ parse_request :: (req : *u8, n : u32) -> *Request, string {
         i += numChars;
         if linefeeds == {
             case 0;
-                return null, tprint("unexpected character after parsing headers. expected (CR)LF, got '%'", to_string(*req[i], 1));
+                return null, 0, tprint("unexpected character after parsing headers. expected (CR)LF, got '%'", to_string(*req[i], 1));
             case 1;
-                if i == n  return null, "missing request body";
+                if i == n  return null, 0, "missing request body";
         }
     }
 
-    /*******
-    * body *
-    *******/
-
-    while i < n {
-        append(*builder, req[i]);
-        i += 1;
-    }
-    request.body = builder_to_string(*builder);
-
-    return request, "";
+    return request, i,  "";
 }
 
 is_header_field_name_char :: (c : u8) -> bool {
