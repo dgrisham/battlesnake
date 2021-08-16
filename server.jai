@@ -153,7 +153,7 @@ main :: () {
                 // put the rest of the unparsed data into the request body
                 append(*body_builder, *req[bytes_parsed], n - bytes_parsed);
                 while builder_string_length(*body_builder) < content_length { // more data to read from the socket
-                    n := read(client_fd, req, BUFFER_MAX);
+                    n := read(client_fd, req, cast(u64) (content_length - builder_string_length(*body_builder)));
                     append(*body_builder, req, n);
                 }
 
