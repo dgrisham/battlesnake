@@ -2,7 +2,7 @@
 #import "Random";
 #import "POSIX";
 
-DEBUG_SNAKE :: false;
+DEBUG_SNAKE :: true;
 
 /***************************
 * battlesnake server types *
@@ -235,8 +235,10 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
 
             if snake_idx == self_idx
                 grid.entities[y][x] = .SELF;
-            else
+            else {
+                print("grid.height: %, snake_idx: %, it.y: %, (x, y): (%, %)\n", grid.height, snake_idx, it.y, x, y);
                 grid.entities[y][x] = .ENEMY;
+            }
 
             if snakes[snake_idx].body[it_index] == snakes[snake_idx].head
                 grid.entities[y][x] |= .HEAD;
@@ -298,7 +300,9 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
         shifted_game_state : Shifted_Game_State;
         shifted_game_state.move          = move;
         shifted_game_state.original_move = move;
-        shifted_game_state.game_state    = update_game_state(game_state, next_moves);
+        shifted_game_state.game_state    = update_game_state(game_state, move);
+        print("shifted_game_state.game_state.snakes: %\n", shifted_game_state.game_state.snakes);
+
         score := score_game_state(shifted_game_state.game_state);
 
         array_add(*shifted_game_states, shifted_game_state);
@@ -339,7 +343,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
                     shifted_game_state.move          = next_move;
                     shifted_game_state.original_move = move;
                     shifted_game_state.depth         = shifted_game_states[i].depth + 1;
-                    shifted_game_state.game_state    = update_game_state(shifted_game_states[i].game_state, next_moves);
+                    shifted_game_state.game_state    = update_game_state(shifted_game_states[i].game_state, move);
 
                     array_add(*shifted_game_states, shifted_game_state);
                 }
@@ -370,18 +374,22 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 }
 
 // apply list of moves to every snake in game state, return new game state
-update_game_state :: (old : Game_State, moves : []Move) -> Game_State {
+update_game_state :: (old : Game_State, move : Move) -> Game_State {
 
     new := initialize_game_state(old.grid.width, old.grid.height, old.snakes.count, old.self_idx);
     for rows, y : old.grid.entities // update food on the board
         for entity, x : rows
             if entity == .FOOD  new.grid.entities[y][x] = .FOOD;
 
-    for move, i : moves {
+    for old.snakes {
+        new.snakes[it_index] = it;
+    }
+    // move the snake
+    new.snakes[old.self_idx] = move_snake(old.snakes[old.self_idx], move);
 
-        // move the snake
-        new.snakes[i] = move_snake(old.snakes[i], move);
-        using new.snakes[i];
+    using new.snakes[old.self_idx];
+
+    for new.snakes {
 
         // mark snake on grid
         for body {
@@ -393,7 +401,7 @@ update_game_state :: (old : Game_State, moves : []Move) -> Game_State {
                 health = MAX_HEALTH;
             }
 
-            if i == new.self_idx
+            if it_index == new.self_idx
                 new.grid.entities[it.y][it.x] = .SELF;
             else
                 new.grid.entities[it.y][it.x] = .ENEMY;
