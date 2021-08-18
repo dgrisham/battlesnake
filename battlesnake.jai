@@ -2,7 +2,7 @@
 #import "Random";
 #import "POSIX";
 
-DEBUG_SNAKE :: true;
+DEBUG_SNAKE :: false;
 
 /***************************
 * battlesnake server types *
@@ -191,7 +191,7 @@ grid_to_string :: (using grid : Grid) -> string {
 * constants *
 ************/
 
-MAX_DEPTH :: 5;
+MAX_DEPTH :: 4;
 
 MAX_HEALTH       :: 100;
 HEALTH_THRESHOLD :: 35;
@@ -215,6 +215,8 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
         }
     }
 
+    filter_snakes_off_board(*board.snakes, board.width, board.height);
+
     using game_state := initialize_game_state(board.width, board.height, board.snakes.count, you_idx);
 
     for battlesnake_snake, snake_idx : board.snakes {
@@ -223,7 +225,7 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
         snakes[snake_idx].head.x = battlesnake_snake.head.x;
         snakes[snake_idx].head.y = board.height - battlesnake_snake.head.y - 1;
         snakes[snake_idx].length = battlesnake_snake.length;
-        snakes[snake_idx].body = NewArray(battlesnake_snake.body.count, Coordinate, false);
+        snakes[snake_idx].body   = NewArray(battlesnake_snake.body.count, Coordinate, false);
 
         for battlesnake_snake.body {
 
@@ -236,7 +238,6 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
             if snake_idx == self_idx
                 grid.entities[y][x] = .SELF;
             else {
-                print("grid.height: %, snake_idx: %, it.y: %, (x, y): (%, %)\n", grid.height, snake_idx, it.y, x, y);
                 grid.entities[y][x] = .ENEMY;
             }
 
@@ -284,7 +285,9 @@ initialize_game_state :: (width : s64, height : s64, num_snakes : s64, you_idx :
 calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 
     game_state := convert_game_state(battlesnake_game_state);
+    if game_state.snakes[game_state.self_idx].health == 0  return .UP;
 
+    #if DEBUG_SNAKE  print("TURN: %\n", battlesnake_game_state.turn);
     #if DEBUG_SNAKE  print(grid_to_string(game_state.grid));
     #if DEBUG_SNAKE  print("snakes: %\n", game_state.snakes);
 
@@ -301,7 +304,6 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
         shifted_game_state.move          = move;
         shifted_game_state.original_move = move;
         shifted_game_state.game_state    = update_game_state(game_state, move);
-        print("shifted_game_state.game_state.snakes: %\n", shifted_game_state.game_state.snakes);
 
         score := score_game_state(shifted_game_state.game_state);
 
@@ -456,7 +458,7 @@ score_game_state :: (using game_state : Game_State) -> s64 {
     return 0;
 }
 
-prune_game_states :: inline (game_states: *[..] Shifted_Game_State) {
+prune_game_states :: inline (game_states: *[] Shifted_Game_State) {
     array_filter(game_states, state_should_continue);
 }
 
@@ -464,11 +466,33 @@ state_should_continue :: inline (using state : Shifted_Game_State) -> bool {
     return !checked && !dead;
 }
 
-array_filter :: inline (array_pointer: *[..] $T, filter: (T) -> bool) {
+array_filter :: inline (array_pointer: *[] $T, filter: (T) -> bool) {
     i := 0;
     while i < array_pointer.count {
         array := <<array_pointer;
         if !filter(array[i]) { // element failed filter, remove
+            for j : i..array.count-2
+                array[j] = array[j+1];
+            array_pointer.count -= 1;
+        } else { // element passed filter, move on to next
+            i += 1;
+        }
+    }
+}
+
+filter_snakes_off_board :: inline (snakes : *[]Battlesnake_Snake, width : s64, height : s64) -> bool {
+    array_filter_with_3_args(
+        snakes,
+        (snake, width, height) => snake.head.x >= 0 && snake.head.x < width && snake.head.y >= 0 && snake.head.y < height,
+        width, height,
+    );
+}
+
+array_filter_with_3_args :: inline (array_pointer: *[] $T, filter: (T, x: $U, y: $V) -> bool, x : U, y : V) {
+    i := 0;
+    while i < array_pointer.count {
+        array := <<array_pointer;
+        if !filter(array[i], x, y) { // element failed filter, remove
             for j : i..array.count-2
                 array[j] = array[j+1];
             array_pointer.count -= 1;
