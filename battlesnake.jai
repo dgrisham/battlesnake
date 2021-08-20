@@ -215,7 +215,10 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
         }
     }
 
-    filter_snakes_off_board(*board.snakes, board.width, board.height);
+    board_dimensions : struct { width: s64; height: s64; };
+    board_dimensions.width  = board.width;
+    board_dimensions.height = board.height;
+    filter_snakes_off_board(*board.snakes, board_dimensions);
 
     using game_state := initialize_game_state(board.width, board.height, board.snakes.count, you_idx);
 
@@ -480,15 +483,21 @@ array_filter :: inline (array_pointer: *[] $T, filter: (T) -> bool) {
     }
 }
 
-filter_snakes_off_board :: inline (snakes : *[]Battlesnake_Snake, width : s64, height : s64) -> bool {
-    array_filter_with_3_args(
+filter_snakes_off_board :: inline (snakes : *[]Battlesnake_Snake, board_dimensions: $T) {
+
+    is_snake_on_board :: inline (snake : Battlesnake_Snake, board_dimensions : $T) -> bool {
+        return snake.head.x >= 0 && snake.head.x < board_dimensions.width
+            && snake.head.y >= 0 && snake.head.y < board_dimensions.height;
+    }
+
+    array_filter_2(
         snakes,
-        (snake, width, height) => snake.head.x >= 0 && snake.head.x < width && snake.head.y >= 0 && snake.head.y < height,
-        width, height,
+        is_snake_on_board,
+        board_dimensions,
     );
 }
 
-array_filter_with_3_args :: inline (array_pointer: *[] $T, filter: (T, x: $U, y: $V) -> bool, x : U, y : V) {
+array_filter_2 :: inline (array_pointer: *[] $T, filter: (T, args: $U) -> bool, args : U) {
     i := 0;
     while i < array_pointer.count {
         array := <<array_pointer;
