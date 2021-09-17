@@ -2,7 +2,7 @@
 #import "Random";
 #import "POSIX";
 
-DEBUG_SNAKE :: false;
+DEBUG_SNAKE := false;
 
 /***************************
 * battlesnake server types *
@@ -191,7 +191,7 @@ grid_to_string :: (using grid : Grid) -> string {
 * constants *
 ************/
 
-MAX_DEPTH :: 4;
+MAX_DEPTH :: 3;
 
 MAX_HEALTH       :: 100;
 HEALTH_THRESHOLD :: 35;
@@ -214,6 +214,7 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
             break;
         }
     }
+    DEBUG_SNAKE = you_idx == 1;
 
     board_dimensions : struct { width: s64; height: s64; };
     board_dimensions.width  = board.width;
@@ -290,9 +291,9 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
     game_state := convert_game_state(battlesnake_game_state);
     if game_state.snakes[game_state.self_idx].health == 0  return .UP;
 
-    #if DEBUG_SNAKE  print("TURN: %\n", battlesnake_game_state.turn);
-    #if DEBUG_SNAKE  print(grid_to_string(game_state.grid));
-    #if DEBUG_SNAKE  print("snakes: %\n", game_state.snakes);
+    if DEBUG_SNAKE  print("TURN: %\n", battlesnake_game_state.turn);
+    if DEBUG_SNAKE  print(grid_to_string(game_state.grid));
+    if DEBUG_SNAKE  print("snakes: %\n", game_state.snakes);
 
     next_moves : []Move = NewArray(battlesnake_game_state.board.snakes.count, Move);
     total_scores := s64.[0, 0, 0, 0];
@@ -362,7 +363,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 
     average_move_scores : [4]s64;
     for total_scores  average_move_scores[it_index] = it / num_scores[it_index];
-    #if DEBUG_SNAKE  for average_move_scores  print("move: %, avg_score: %\n", cast(Move) it_index, it);
+    if DEBUG_SNAKE  for average_move_scores  print("move: %, avg_score: %\n", cast(Move) it_index, it);
 
     max_score := average_move_scores[0];
     max_score_idx := 0;
@@ -374,7 +375,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
         }
     }
 
-    #if DEBUG_SNAKE  print("choice: %\n", cast(Move) max_score_idx);
+    if DEBUG_SNAKE  print("choice: %\n", cast(Move) max_score_idx);
     return cast(Move) max_score_idx;
 }
 
@@ -386,18 +387,19 @@ update_game_state :: (old : Game_State, move : Move) -> Game_State {
         for entity, x : rows
             if entity == .FOOD  new.grid.entities[y][x] = .FOOD;
 
-    for old.snakes {
-        new.snakes[it_index] = it;
-    }
+    // initialize updated snake
+    for old.snakes  new.snakes[it_index] = it;
+
     // move the snake
-    new.snakes[old.self_idx] = move_snake(old.snakes[old.self_idx], move);
+    new.snakes[new.self_idx] = move_snake(old.snakes[old.self_idx], move);
 
-    using new.snakes[old.self_idx];
+    for snake_idx : 0..new.snakes.count-1 {
 
-    for new.snakes {
+        using new.snakes[snake_idx];
 
         // mark snake on grid
         for body {
+
             if head.x < 0 || head.x >= new.grid.width
             || head.y < 0 || head.y >= new.grid.height { // head is off the board
                 health = 0;
@@ -406,29 +408,79 @@ update_game_state :: (old : Game_State, move : Move) -> Game_State {
                 health = MAX_HEALTH;
             }
 
-            if it_index == new.self_idx
+            // TODO: I think the issue right now is framing the snakes as
+            // SELF and ENEMY. this doesn't give us a way to resolve collisions
+            // between two enemies. even though we don't quite support that in
+            // other ways, it makes it awkward to resolve the logic below as to
+            // what happens to two snakes when they collide. we might want somethin
+            // like a BODY vs. HEAD distinction, along with the index of the snake,
+            // then a function that takes a board with this info...that's not quite
+            // the entire story, but something like that is in the direction of a
+            // better modeling approach.
+
+            if snake_idx == new.self_idx {
+                if head == it {
+                    if new.grid.entities[it.y][it.x] == {
+                        case .ENEMY;
+                            // dead
+                        case .ENEMY | .HEAD;
+                            // smaller snake dead
+                    }
+                } else {
+                    if new.grid.entities[it.y][it.x] == {
+                        case .ENEMY | .HEAD;
+                            // enemy dead
+                    }
+                }
                 new.grid.entities[it.y][it.x] = .SELF;
+            }
             else
                 new.grid.entities[it.y][it.x] = .ENEMY;
 
-            if head == it
+            if head == it {
                 new.grid.entities[it.y][it.x] |= .HEAD;
+            }
         }
     }
 
+    // head: 0010
+    // it:   1110
+    // and:  0010
+    // !and: 1101
+
+    // head: 0010
+    // it:   1100
+
+    // for each updated snake...
     for * new.snakes {
 
-        if it.health != 0 // snake didn't run off board
-            if new.grid.entities[it.head.y][it.head.x] == {
-                case .SELF;  #through;
-                case .ENEMY; #through;
-                case Entity.ENEMY | .HEAD;
-                    it.health = 0;
+        if it.health != 0 { // snake didn't run off board
+            print("new.grid.entities[it.head.y][it.head.x]: %\n", new.grid.entities[it.head.y][it.head.x]);
+
+            if new.grid.entities[it.head.y][it.head.x] & .SELF & .ENEMY {
+
             }
+
+
+
+            if new.grid.entities[it.head.y][it.head.x] == {
+                case .SELF;
+                    if DEBUG_SNAKE  print("HERE!: %\n", new.grid.entities[it.head.y][it.head.x]);
+                    #through;
+                case .ENEMY;
+                    if DEBUG_SNAKE  print("HERE!: %\n", new.grid.entities[it.head.y][it.head.x]);
+                    #through;
+                case Entity.ENEMY | .HEAD; {
+                    // if DEBUG_SNAKE  print("HERE!: %\n", new.grid.entities[it.head.y][it.head.x]);
+                    it.health = 0;
+                }
+            }
+        }
 
         it.health_delta = it.health - old.snakes[it_index].health;
     }
 
+    // if DEBUG_SNAKE  print("new.grid:\n%", grid_to_string(new.grid));
     return new;
 }
 
@@ -485,7 +537,7 @@ array_filter :: inline (array_pointer: *[] $T, filter: (T) -> bool) {
 
 filter_snakes_off_board :: inline (snakes : *[]Battlesnake_Snake, board_dimensions: $T) {
 
-    is_snake_on_board :: inline (snake : Battlesnake_Snake, board_dimensions : $T) -> bool {
+    is_snake_on_board :: inline (snake : Battlesnake_Snake, board_dimensions : T) -> bool {
         return snake.head.x >= 0 && snake.head.x < board_dimensions.width
             && snake.head.y >= 0 && snake.head.y < board_dimensions.height;
     }
@@ -501,7 +553,7 @@ array_filter_2 :: inline (array_pointer: *[] $T, filter: (T, args: $U) -> bool, 
     i := 0;
     while i < array_pointer.count {
         array := <<array_pointer;
-        if !filter(array[i], x, y) { // element failed filter, remove
+        if !filter(array[i], args) { // element failed filter, remove
             for j : i..array.count-2
                 array[j] = array[j+1];
             array_pointer.count -= 1;
