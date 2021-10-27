@@ -101,6 +101,7 @@ Snake :: struct {
     head         : Coordinate;
     length       : s64;
     health_delta : s64;
+    dead         : bool = false;
 }
 
 Coordinate :: struct {
@@ -223,7 +224,7 @@ convert_game_state :: (using battlesnake_game_state : Battlesnake_Game_State) ->
         snakes[snake_idx].head.x = battlesnake_snake.head.x;
         snakes[snake_idx].head.y = board.height - battlesnake_snake.head.y - 1;
         snakes[snake_idx].length = battlesnake_snake.length;
-        snakes[snake_idx].body = NewArray(battlesnake_snake.body.count, Coordinate, false);
+        snakes[snake_idx].body   = NewArray(battlesnake_snake.body.count, Coordinate, false);
 
         for battlesnake_snake.body {
 
@@ -283,6 +284,11 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
 
     game_state := convert_game_state(battlesnake_game_state);
 
+    // if game_state.snakes.count != 1 {
+    //     print("game_state.self_idx:\n%\n", game_state.self_idx);
+    //     print("grid:\n%\n", grid_to_string(game_state.grid));
+    // }
+
     #if DEBUG_SNAKE  print(grid_to_string(game_state.grid));
     #if DEBUG_SNAKE  print("snakes: %\n", game_state.snakes);
 
@@ -299,7 +305,6 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
         shifted_game_state.move          = move;
         shifted_game_state.original_move = move;
         shifted_game_state.game_state    = update_game_state(game_state, next_moves);
-        score := score_game_state(shifted_game_state.game_state);
 
         array_add(*shifted_game_states, shifted_game_state);
 
@@ -366,6 +371,7 @@ calculate_move :: (battlesnake_game_state : Battlesnake_Game_State) -> Move {
     }
 
     #if DEBUG_SNAKE  print("choice: %\n", cast(Move) max_score_idx);
+
     return cast(Move) max_score_idx;
 }
 
@@ -377,7 +383,15 @@ update_game_state :: (old : Game_State, moves : []Move) -> Game_State {
         for entity, x : rows
             if entity == .FOOD  new.grid.entities[y][x] = .FOOD;
 
-    for move, i : moves {
+    // for move, i : moves {
+
+    move := moves[0];
+    i := old.self_idx;
+
+    // battlesnake removes dead snakes from the board, so this check will only pass if the snake
+    // died as we recursed through game states. we don't delete the snake from the array though,
+    // so we check the health instead and skip the snake if it's dead
+    if old.snakes[i].health != 0 {
 
         // move the snake
         new.snakes[i] = move_snake(old.snakes[i], move);
@@ -401,6 +415,7 @@ update_game_state :: (old : Game_State, moves : []Move) -> Game_State {
             if head == it
                 new.grid.entities[it.y][it.x] |= .HEAD;
         }
+
     }
 
     for * new.snakes {
